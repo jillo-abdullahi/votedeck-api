@@ -1,0 +1,52 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String   @id
+  name         String
+  recoveryCode String?  @unique @map("recovery_code")
+  recoveryHash String?  @map("recovery_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("users")
+}
+
+model Room {
+  id           String   @id
+  name         String
+  adminId      String   @map("admin_id")
+  votingSystem String   @map("voting_system")
+  revealed     Boolean  @default(false)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("rooms")
+}
+
+model Vote {
+  id        Int      @id @default(autoincrement())
+  roomId    String   @map("room_id")
+  userId    String   @map("user_id")
+  value     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([roomId, userId])
+  @@map("votes")
+}
+
+model Participant {
+  id        Int      @id @default(autoincrement())
+  roomId    String   @map("room_id")
+  userId    String   @map("user_id")
+  joinedAt  DateTime @default(now()) @map("joined_at")
+
+  @@unique([roomId, userId])
+  @@map("participants")
+}
