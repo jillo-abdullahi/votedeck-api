@@ -134,8 +134,10 @@ export const roomStore = {
 
         // REMOVED: multi.hdel(`room:${roomId}:votes`, user.id); -- Keep votes for reloads
 
-        multi.sadd(`room:${roomId}:user:${user.id}:sockets`, user.socketId || '');
-        multi.expire(`room:${roomId}:user:${user.id}:sockets`, ROOM_TTL);
+        if (user.socketId) {
+            multi.sadd(`room:${roomId}:user:${user.id}:sockets`, user.socketId);
+            multi.expire(`room:${roomId}:user:${user.id}:sockets`, ROOM_TTL);
+        }
 
         multi.expire(`room:${roomId}:users`, ROOM_TTL);
         multi.expire(`room:${roomId}:user_data`, ROOM_TTL);
