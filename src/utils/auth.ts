@@ -4,9 +4,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'another-super-secret-key';
-const JWT_ACCESS_TTL = process.env.JWT_ACCESS_TTL || '15m';
-const JWT_REFRESH_TTL = process.env.JWT_REFRESH_TTL || '7d';
+const JWT_ACCESS_TTL = process.env.JWT_ACCESS_TTL || '7d';
 
 export interface TokenPayload {
     sub: string;
@@ -21,12 +19,6 @@ export function generateAccessToken(payload: TokenPayload): string {
     return jwt.sign(payload, JWT_SECRET as jwt.Secret, { expiresIn: JWT_ACCESS_TTL as any });
 }
 
-/**
- * Generate Refresh Token
- */
-export function generateRefreshToken(userId: string): string {
-    return jwt.sign({ sub: userId }, JWT_REFRESH_SECRET as jwt.Secret, { expiresIn: JWT_REFRESH_TTL as any });
-}
 
 /**
  * Verify Access Token
@@ -36,8 +28,17 @@ export function verifyAccessToken(token: string): TokenPayload {
 }
 
 /**
- * Verify Refresh Token
+ * Get Cookie Options based on environment
  */
-export function verifyRefreshToken(token: string): { sub: string } {
-    return jwt.verify(token, JWT_REFRESH_SECRET) as { sub: string };
+export function getCookieOptions(maxAgeSeconds: number = 7 * 24 * 60 * 60) {
+    const isProd = process.env.NODE_ENV === 'production';
+    return {
+        path: '/',
+        httpOnly: true,
+        // Prod: Needs Secure + SameSite=None for cross-domain
+        // Dev: Needs Secure=false + SameSite=Lax for local IP/localhost
+        secure: isProd,
+        sameSite: isProd ? 'none' as const : 'lax' as const,
+        maxAge: maxAgeSeconds
+    };
 }

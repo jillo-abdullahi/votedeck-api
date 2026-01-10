@@ -1,6 +1,7 @@
 import type { CreateRoomRequest, CreateRoomResponse } from '../types/index.js';
 import { roomStore } from '../store/roomStore.js';
 import { prisma } from '../db/prisma.js';
+import { getCookieOptions } from '../utils/auth.js';
 import type { FastifyInstance } from 'fastify';
 
 export async function roomRoutes(fastify: FastifyInstance) {
@@ -12,6 +13,9 @@ export async function roomRoutes(fastify: FastifyInstance) {
         '/rooms',
         {
             schema: {
+                tags: ['Rooms'],
+                summary: 'Create a room',
+                description: 'Creates a new voting room. If no adminId provided, creates an anonymous user.',
                 body: {
                     type: 'object',
                     required: ['name', 'votingSystem'],
@@ -25,6 +29,23 @@ export async function roomRoutes(fastify: FastifyInstance) {
                         adminName: { type: 'string' },
                     },
                 },
+                response: {
+                    201: {
+                        type: 'object',
+                        properties: {
+                            roomId: { type: 'string' },
+                            joinUrl: { type: 'string' },
+                            userId: { type: 'string' },
+                            recoveryCode: { type: 'string' }
+                        }
+                    },
+                    '4xx': {
+                        type: 'object',
+                        properties: {
+                            error: { type: 'string' }
+                        }
+                    }
+                }
             },
         },
         async (request, reply) => {
@@ -93,10 +114,12 @@ export async function roomRoutes(fastify: FastifyInstance) {
 
             const joinUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/room/${room.id}`;
 
+            // Set host token in cookie
+            reply.setCookie('accessToken', hostToken, getCookieOptions());
+
             return reply.code(201).send({
                 roomId: room.id,
                 joinUrl,
-                accessToken: hostToken,
                 userId: effectiveAdminId,
                 recoveryCode
             });
@@ -109,6 +132,46 @@ export async function roomRoutes(fastify: FastifyInstance) {
      */
     fastify.get<{ Querystring: { limit?: number; offset?: number } }>(
         '/rooms/my',
+        {
+            schema: {
+                tags: ['Rooms'],
+                summary: 'Get my rooms',
+                description: 'Returns a list of rooms owned by the authenticated user.',
+                security: [{ cookieAuth: [] }],
+                querystring: {
+                    type: 'object',
+                    properties: {
+                        limit: { type: 'integer', default: 20 },
+                        offset: { type: 'integer', default: 0 }
+                    }
+                },
+                response: {
+                    200: {
+                        type: 'object',
+                        properties: {
+                            rooms: {
+                                type: 'array',
+                                items: {
+                                    type: 'object',
+                                    properties: {
+                                        id: { type: 'string' },
+                                        name: { type: 'string' },
+                                        createdAt: { type: 'string' }
+                                    }
+                                }
+                            },
+                            total: { type: 'integer' }
+                        }
+                    },
+                    '4xx': {
+                        type: 'object',
+                        properties: {
+                            error: { type: 'string' }
+                        }
+                    }
+                }
+            }
+        },
         async (request, reply) => {
             try {
                 const decoded = await request.jwtVerify() as { sub: string };
@@ -131,6 +194,37 @@ export async function roomRoutes(fastify: FastifyInstance) {
      */
     fastify.get<{ Params: { id: string } }>(
         '/rooms/:id',
+        {
+            schema: {
+                tags: ['Rooms'],
+                summary: 'Get room details',
+                description: 'Returns metadata for a specific room.',
+                params: {
+                    type: 'object',
+                    required: ['id'],
+                    properties: {
+                        id: { type: 'string' }
+                    }
+                },
+                response: {
+                    200: {
+                        type: 'object',
+                        properties: {
+                            id: { type: 'string' },
+                            name: { type: 'string' },
+                            votingSystem: { type: 'string' },
+                            createdAt: { type: 'string' }
+                        }
+                    },
+                    '4xx': {
+                        type: 'object',
+                        properties: {
+                            error: { type: 'string' }
+                        }
+                    }
+                }
+            }
+        },
         async (request, reply) => {
             const { id } = request.params;
 
@@ -156,6 +250,41 @@ export async function roomRoutes(fastify: FastifyInstance) {
      */
     fastify.delete<{ Params: { id: string } }>(
         '/rooms/:id',
+        {
+            schema: {
+                tags: ['Rooms'],
+                summary: 'Delete room',
+                description: 'Deletes a room. Requester must be the room owner.',
+                security: [{ cookieAuth: [] }],
+                params: {
+                    type: 'object',
+                    required: ['id'],
+                    properties: {
+                        id: { type: 'string' }
+                    }
+                },
+                response: {
+                    200: {
+                        type: 'object',
+                        properties: {
+                            success: { type: 'boolean' }
+                        }
+                    },
+                    '4xx': {
+                        type: 'object',
+                        properties: {
+                            error: { type: 'string' }
+                        }
+                    },
+                    '5xx': {
+                        type: 'object',
+                        properties: {
+                            error: { type: 'string' }
+                        }
+                    }
+                }
+            }
+        },
         async (request, reply) => {
             try {
                 const { id } = request.params;

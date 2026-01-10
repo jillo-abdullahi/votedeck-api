@@ -2,6 +2,8 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyJwt from '@fastify/jwt';
 import cookie from '@fastify/cookie';
+import fastifySwagger from '@fastify/swagger';
+import fastifySwaggerUi from '@fastify/swagger-ui';
 import dotenv from 'dotenv';
 import { Server as SocketIOServer } from 'socket.io';
 import { roomRoutes } from './routes/rooms.js';
@@ -25,7 +27,9 @@ async function start() {
             const allowedOrigins = [
                 process.env.FRONTEND_URL,
                 'http://localhost:5173',
-                'http://127.0.0.1:5173'
+                'http://127.0.0.1:5173',
+                `http://${HOST}:${PORT}`, // Allow self (Swagger UI)
+                `http://localhost:${PORT}`
             ].filter(Boolean);
 
             // Allow requests with no origin (like mobile apps or curl requests)
@@ -46,13 +50,43 @@ async function start() {
     await fastify.register(fastifyJwt, {
         secret: process.env.JWT_SECRET || 'super-secret-key',
         cookie: {
-            cookieName: 'refreshToken',
+            cookieName: 'accessToken',
             signed: false,
         },
     });
 
     // Register Cookie
     await fastify.register(cookie);
+
+    // Register Swagger (OpenAPI)
+    await fastify.register(fastifySwagger, {
+        openapi: {
+            info: {
+                title: 'VoteDeck API',
+                description: 'Real-time Planning Poker API',
+                version: '1.0.0',
+            },
+            components: {
+                securitySchemes: {
+                    cookieAuth: {
+                        type: 'apiKey',
+                        in: 'cookie',
+                        name: 'accessToken',
+                    },
+                },
+            },
+            security: [{ cookieAuth: [] }],
+        },
+    });
+
+    await fastify.register(fastifySwaggerUi, {
+        routePrefix: '/documentation',
+        uiConfig: {
+            docExpansion: 'list',
+            deepLinking: false,
+        },
+        staticCSP: true,
+    });
 
     // Register HTTP routes
     await fastify.register(authRoutes);
@@ -71,8 +105,15 @@ async function start() {
 
     // WebSocket Handshake Authentication
     io.use((socket, next) => {
-        // In Socket.IO and React, we often send token in auth object
-        const token = socket.handshake.auth.token || socket.handshake.headers['authorization']?.split(' ')[1];
+        let token: string | undefined;
+
+        if (socket.handshake.headers.cookie) {
+            const cookies = socket.handshake.headers.cookie.split(';');
+            const accessTokenCookie = cookies.find(c => c.trim().startsWith('accessToken='));
+            if (accessTokenCookie) {
+                token = accessTokenCookie.split('=')[1];
+            }
+        }
 
         if (!token) {
             return next(new Error('Authentication error: Token missing'));
@@ -80,9 +121,8 @@ async function start() {
 
         try {
             // We use fastify.jwt for verification
-            const decoded = fastify.jwt.verify(token) as { sub: string; role: string };
+            const decoded = fastify.jwt.verify(token) as { sub: string };
             (socket as any).userId = decoded.sub;
-            (socket as any).role = decoded.role;
             next();
         } catch (err) {
             next(new Error('Authentication error: Invalid token'));

@@ -117,7 +117,6 @@ export function setupSocketHandlers(io: SocketIOServer) {
          */
         socket.on('REVEAL', async () => {
             const userId = (socket as any).userId;
-            const role = (socket as any).role;
 
             const userInfo = await roomStore.getUserBySocketId(socket.id);
             if (!userInfo) {
@@ -134,7 +133,7 @@ export function setupSocketHandlers(io: SocketIOServer) {
             }
 
             // Role check
-            if (role !== 'host' && room.adminId !== userId && room.revealPolicy !== 'everyone') {
+            if (room.adminId !== userId && room.revealPolicy !== 'everyone') {
                 socket.emit('ERROR', { message: 'Only the host can reveal votes' });
                 return;
             }
@@ -153,7 +152,6 @@ export function setupSocketHandlers(io: SocketIOServer) {
          */
         socket.on('RESET', async () => {
             const userId = (socket as any).userId;
-            const role = (socket as any).role;
 
             const userInfo = await roomStore.getUserBySocketId(socket.id);
             if (!userInfo) {
@@ -170,7 +168,7 @@ export function setupSocketHandlers(io: SocketIOServer) {
             }
 
             // Role check
-            if (role !== 'host' && room.adminId !== userId && room.revealPolicy !== 'everyone') {
+            if (room.adminId !== userId && room.revealPolicy !== 'everyone') {
                 socket.emit('ERROR', { message: 'Only the host can reset the vote' });
                 return;
             }
@@ -203,7 +201,6 @@ export function setupSocketHandlers(io: SocketIOServer) {
          */
         socket.on('UPDATE_SETTINGS', async (payload: UpdateSettingsPayload) => {
             const userId = (socket as any).userId;
-            const role = (socket as any).role;
 
             const userInfo = await roomStore.getUserBySocketId(socket.id);
             if (!userInfo) return;
@@ -211,7 +208,7 @@ export function setupSocketHandlers(io: SocketIOServer) {
             const { roomId } = userInfo;
             const room = await roomStore.getRoom(roomId);
 
-            if (!room || (role !== 'host' && room.adminId !== userId)) return;
+            if (!room || room.adminId !== userId) return;
 
             await roomStore.updateSettings(roomId, payload);
             await broadcastRoomState(io, roomId);

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
-import { generateAccessToken, generateRefreshToken } from '../utils/auth.js';
+import { generateAccessToken, getCookieOptions } from '../utils/auth.js';
 import { prisma } from '../db/prisma.js';
 
 export async function authRoutes(fastify: FastifyInstance) {
@@ -8,7 +8,29 @@ export async function authRoutes(fastify: FastifyInstance) {
      * POST /auth/anonymous
      * Create an anonymous user and return tokens
      */
-    fastify.post('/auth/anonymous', async (request, reply) => {
+    fastify.post('/auth/anonymous', {
+        schema: {
+            tags: ['Auth'],
+            summary: 'Create anonymous session',
+            description: 'Creates a new anonymous user and sets the access token cookie.',
+            response: {
+                200: {
+                    type: 'object',
+                    properties: {
+                        userId: { type: 'string' },
+                        recoveryCode: { type: 'string' }
+                    }
+                },
+                '4xx': {
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' },
+                        message: { type: 'string' }
+                    }
+                }
+            }
+        }
+    }, async (request, reply) => {
         const userId = nanoid();
         const recoveryCode = nanoid(12);
 
@@ -26,20 +48,11 @@ export async function authRoutes(fastify: FastifyInstance) {
             sub: userId,
             role: 'participant'
         });
-        const refreshToken = generateRefreshToken(userId);
-
-        // Set refresh token in cookie
-        reply.setCookie('refreshToken', refreshToken, {
-            path: '/',
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
-            maxAge: 7 * 24 * 60 * 60 // 7 days
-        });
+        // Set access token in cookie
+        reply.setCookie('accessToken', accessToken, getCookieOptions());
 
         return {
             userId,
-            accessToken,
             recoveryCode
         };
     });
@@ -48,7 +61,36 @@ export async function authRoutes(fastify: FastifyInstance) {
      * POST /auth/restore
      * Restore session via recovery code
      */
-    fastify.post('/auth/restore', async (request, reply) => {
+    fastify.post('/auth/restore', {
+        schema: {
+            tags: ['Auth'],
+            summary: 'Restore session',
+            description: 'Restores a user session using a recovery code.',
+            body: {
+                type: 'object',
+                required: ['recoveryCode'],
+                properties: {
+                    recoveryCode: { type: 'string' }
+                }
+            },
+            response: {
+                200: {
+                    type: 'object',
+                    properties: {
+                        userId: { type: 'string' },
+                        name: { type: 'string' },
+                        recoveryCode: { type: 'string' }
+                    }
+                },
+                '4xx': {
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                }
+            }
+        }
+    }, async (request, reply) => {
         const { recoveryCode } = request.body as { recoveryCode: string };
 
         if (!recoveryCode) {
@@ -96,54 +138,90 @@ export async function authRoutes(fastify: FastifyInstance) {
             sub: user.id,
             role: 'participant'
         });
-        const refreshToken = generateRefreshToken(user.id);
-
-        reply.setCookie('refreshToken', refreshToken, {
-            path: '/',
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
-            maxAge: 7 * 24 * 60 * 60
-        });
+        reply.setCookie('accessToken', accessToken, getCookieOptions());
 
         return {
             userId: user.id,
-            accessToken,
             name: user.name,
             recoveryCode
         };
     });
 
-    /**
-     * POST /auth/refresh
-     * Refresh access token
-     */
-    fastify.post('/auth/refresh', async (request, reply) => {
-        const refreshToken = request.cookies.refreshToken;
 
-        if (!refreshToken) {
-            return reply.code(401).send({ error: 'Refresh token missing' });
-        }
-
-        try {
-            const decoded = fastify.jwt.verify(refreshToken) as { sub: string };
-            const accessToken = generateAccessToken({
-                sub: decoded.sub,
-                role: 'participant'
-            });
-
-            return { accessToken };
-        } catch (err) {
-            return reply.code(401).send({ error: 'Invalid refresh token' });
-        }
-    });
 
     /**
      * POST /auth/logout
      * Clear tokens
      */
-    fastify.post('/auth/logout', async (request, reply) => {
-        reply.clearCookie('refreshToken', { path: '/' });
+    fastify.post('/auth/logout', {
+        schema: {
+            tags: ['Auth'],
+            summary: 'Logout',
+            description: 'Clears the access token cookie.',
+            response: {
+                200: {
+                    type: 'object',
+                    properties: {
+                        success: { type: 'boolean' }
+                    }
+                },
+                '4xx': {
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                }
+            }
+        }
+    }, async (request, reply) => {
+        reply.clearCookie('accessToken', getCookieOptions(0));
         return { success: true };
+    });
+
+
+
+    /**
+     * GET /auth/me
+     * Get current user info
+     */
+    fastify.get('/auth/me', {
+        schema: {
+            tags: ['Auth'],
+            summary: 'Get current user',
+            description: 'Returns the currently authenticated user based on the access token cookie.',
+            response: {
+                200: {
+                    type: 'object',
+                    properties: {
+                        id: { type: 'string' },
+                        name: { type: 'string' }
+                    }
+                },
+                '4xx': {
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                }
+            }
+        }
+    }, async (request, reply) => {
+        try {
+            const decoded = await request.jwtVerify() as { sub: string };
+            const userId = decoded.sub;
+
+            const user = await prisma.user.findUnique({
+                where: { id: userId },
+                select: { id: true, name: true }
+            });
+
+            if (!user) {
+                return reply.code(404).send({ error: 'User not found' });
+            }
+
+            return user;
+        } catch (err) {
+            return reply.code(401).send({ error: 'Unauthorized' });
+        }
     });
 }
