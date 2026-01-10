@@ -138,13 +138,31 @@ export function setupSocketHandlers(io: SocketIOServer) {
                 return;
             }
 
-            const success = await roomStore.revealVotes(roomId);
-            if (!success) {
-                socket.emit('ERROR', { message: 'Failed to reveal votes' });
-                return;
-            }
+            const doReveal = async () => {
+                const success = await roomStore.revealVotes(roomId);
+                if (!success) {
+                    socket.emit('ERROR', { message: 'Failed to reveal votes' });
+                    return;
+                }
+                await broadcastRoomState(io, roomId);
+            };
 
-            await broadcastRoomState(io, roomId);
+            if (room.enableCountdown) {
+                // 1. Broadcast Countdown (3s duration for frontend animation)
+                io.to(roomId).emit('COUNTDOWN_START', { duration: 3 });
+
+                // 2. Wait 3.5s (3s + 500ms buffer) to ensure frontend animation finishes
+                setTimeout(async () => {
+                    // Re-fetch room to ensure it still exists and isn't already revealed
+                    const currentRoom = await roomStore.getRoom(roomId);
+                    if (currentRoom && !currentRoom.revealed) {
+                        await doReveal();
+                    }
+                }, 3500);
+            } else {
+                // Immediate reveal
+                await doReveal();
+            }
         });
 
         /**

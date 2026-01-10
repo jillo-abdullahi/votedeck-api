@@ -25,6 +25,7 @@ model Room {
   adminId      String   @map("admin_id")
   votingSystem String   @map("voting_system")
   revealed     Boolean  @default(false)
+  enableCountdown Boolean @default(true) @map("enable_countdown")
   createdAt    DateTime @default(now()) @map("created_at")
 
   @@map("rooms")

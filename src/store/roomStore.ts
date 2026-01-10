@@ -21,6 +21,7 @@ export const roomStore = {
                 adminId,
                 votingSystem,
                 revealed: false,
+                enableCountdown: true, // Default
             }
         });
         console.log(`[createRoom] Postgres room created. Saving to Redis...`);
@@ -33,6 +34,7 @@ export const roomStore = {
             votingSystem,
             revealPolicy: 'everyone',
             revealed: 'false',
+            enableCountdown: 'true',
             createdAt: pgRoom.createdAt.toISOString(),
         };
 
@@ -49,6 +51,7 @@ export const roomStore = {
         return {
             ...roomMeta,
             revealed: false,
+            enableCountdown: true,
             createdAt: pgRoom.createdAt,
             users: new Map(),
             votes: new Map(),
@@ -83,6 +86,7 @@ export const roomStore = {
                 votingSystem: pgRoom.votingSystem,
                 revealPolicy: 'everyone', // Default
                 revealed: String((pgRoom as any).revealed),
+                enableCountdown: String((pgRoom as any).enableCountdown),
                 createdAt: pgRoom.createdAt.toISOString(),
             };
 
@@ -97,8 +101,8 @@ export const roomStore = {
 
         return {
             ...meta,
-            // Cast strictly to string to handle both "true" string and true boolean
             revealed: String((meta as any).revealed) === 'true',
+            enableCountdown: String((meta as any).enableCountdown) === 'true',
             createdAt: new Date((meta as any).createdAt),
         };
     },
@@ -213,7 +217,7 @@ export const roomStore = {
     /**
      * Update room settings
      */
-    async updateSettings(roomId: string, updates: Partial<Pick<Room, 'name' | 'votingSystem' | 'revealPolicy'>>): Promise<boolean> {
+    async updateSettings(roomId: string, updates: Partial<Pick<Room, 'name' | 'votingSystem' | 'revealPolicy' | 'enableCountdown'>>): Promise<boolean> {
         const exists = await redis.exists(`room:${roomId}:meta`);
         if (!exists) return false;
 
@@ -233,6 +237,13 @@ export const roomStore = {
         }
         if (updates.revealPolicy !== undefined) {
             await redis.hset(`room:${roomId}:meta`, { revealPolicy: updates.revealPolicy });
+        }
+        if (updates.enableCountdown !== undefined) {
+            await redis.hset(`room:${roomId}:meta`, { enableCountdown: String(updates.enableCountdown) });
+            await (prisma.room as any).update({
+                where: { id: roomId },
+                data: { enableCountdown: updates.enableCountdown },
+            });
         }
 
         return true;
@@ -450,6 +461,7 @@ export const roomStore = {
             adminId: meta.adminId,
             votingSystem: meta.votingSystem,
             revealPolicy: meta.revealPolicy,
+            enableCountdown: meta.enableCountdown,
             users,
             votes,
             revealed: meta.revealed,

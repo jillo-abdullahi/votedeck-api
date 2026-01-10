@@ -16,8 +16,10 @@ export interface Room {
     votingSystem: VotingSystemId;
     revealPolicy: RevealPolicy;
     users: Map<string, User>;
+    voteMap: Map<string, string | null>; // Client-side vote map (optional) or we can infer from votes
     votes: Map<string, string | null>;
     revealed: boolean;
+    enableCountdown: boolean;
     createdAt: Date;
 }
 
@@ -34,6 +36,7 @@ export interface RoomState {
     }>;
     votes: Record<string, string | null>;
     revealed: boolean;
+    enableCountdown: boolean;
 }
 
 // Socket.IO event payloads
@@ -55,6 +58,7 @@ export interface UpdateSettingsPayload {
     name?: string;
     votingSystem?: VotingSystemId;
     revealPolicy?: RevealPolicy;
+    enableCountdown?: boolean;
 }
 
 export interface CreateRoomRequest {
