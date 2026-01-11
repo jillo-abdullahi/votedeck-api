@@ -38,6 +38,11 @@ export function setupSocketHandlers(io: SocketIOServer) {
     io.on('connection', (socket: Socket) => {
         console.log(`Socket connected: ${socket.id}`);
 
+        // Log all incoming events for debugging
+        socket.onAny((eventName, ...args) => {
+            console.log(`[Socket] Received event: ${eventName}`, args);
+        });
+
         // Join user-specific channel for personal updates (like dashboard)
         const userId = (socket as any).userId;
         if (userId) {
@@ -49,16 +54,21 @@ export function setupSocketHandlers(io: SocketIOServer) {
          */
         socket.on('JOIN_ROOM', async (payload: JoinRoomPayload) => {
             const { roomId, userId, name } = payload;
+            console.log(`[JOIN_ROOM] Start: roomId=${roomId}, userId=${userId}, name=${name}`);
 
             try {
                 const room = await roomStore.getRoom(roomId);
                 if (!room) {
+                    console.warn(`[JOIN_ROOM] Room not found: ${roomId}`);
                     socket.emit('ERROR', { message: 'Room not found' });
                     return;
                 }
+                console.log(`[JOIN_ROOM] Room found. Mapping socket ${socket.id}...`);
 
                 // Map socket to user/room for disconnection handling
                 await roomStore.mapSocket(socket.id, userId, roomId);
+
+                console.log(`[JOIN_ROOM] Adding user to room...`);
 
                 // Add user to room
                 const success = await roomStore.addUser(roomId, {
@@ -68,9 +78,12 @@ export function setupSocketHandlers(io: SocketIOServer) {
                 });
 
                 if (!success) {
+                    console.error(`[JOIN_ROOM] Failed to add user to room store`);
                     socket.emit('ERROR', { message: 'Failed to join room' });
                     return;
                 }
+
+                console.log(`[JOIN_ROOM] Joining socket.io room...`);
 
                 // Join socket room
                 socket.join(roomId);
@@ -81,9 +94,13 @@ export function setupSocketHandlers(io: SocketIOServer) {
                 // Notify admin's dashboard
                 await notifyRoomAdmin(io, roomId);
 
-                console.log(`User ${name} (${userId}) joined room ${roomId}`);
+                console.log(`[JOIN_ROOM] Success: User ${name} (${userId}) joined room ${roomId}`);
             } catch (err) {
-                console.error(`[JOIN_ROOM] Error for room ${roomId}:`, err);
+                console.error(`[JOIN_ROOM] CRITICAL ERROR for room ${roomId}:`, err);
+                // Log full error details including stack trace
+                if (err instanceof Error) {
+                    console.error(err.stack);
+                }
                 socket.emit('ERROR', { message: 'Internal server error while joining room' });
             }
         });

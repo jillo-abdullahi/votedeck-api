@@ -32,20 +32,25 @@ async function start() {
 
     console.log('Allowed Origins:', allowedOrigins);
 
+    // Shared CORS validator
+    const checkOrigin = (origin: string | undefined, cb: (err: Error | null, allow: boolean) => void) => {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        // Note: Socket.IO requests usually have origin.
+        if (!origin) {
+            return cb(null, true);
+        }
+
+        if (allowedOrigins.includes(origin)) {
+            return cb(null, true);
+        }
+
+        console.log(`[CORS] Blocked request from origin: ${origin}`);
+        return cb(new Error("Not allowed by CORS"), false);
+    };
+
     // Register CORS
     await fastify.register(cors, {
-        origin: (origin, cb) => {
-            // Allow requests with no origin (like mobile apps or curl requests)
-            if (!origin) return cb(null, true);
-
-            if (allowedOrigins.includes(origin)) {
-                return cb(null, true);
-            }
-
-            // For now, in this hybrid dev/prod mode, let's log the failure to help debugging
-            console.log(`Blocked by CORS: ${origin}`);
-            return cb(new Error("Not allowed"), false);
-        },
+        origin: checkOrigin,
         credentials: true,
     });
 
@@ -98,7 +103,14 @@ async function start() {
     // Create Socket.IO server
     const io = new SocketIOServer(fastify.server, {
         cors: {
-            origin: allowedOrigins,
+            origin: (origin, callback) => {
+                // Socket.IO CORS callback signature matches (err, success)
+                // but types might effectively match checkOrigin structure
+                checkOrigin(origin, (err, allow) => {
+                    if (err) return callback(err, false);
+                    return callback(null, allow);
+                });
+            },
             credentials: true,
         },
     });
@@ -108,17 +120,24 @@ async function start() {
 
     // WebSocket Handshake Authentication
     io.use((socket, next) => {
+        const origin = socket.handshake.headers.origin;
+        console.log(`[Socket] Handshake from origin: ${origin}`);
+
         let token: string | undefined;
 
         if (socket.handshake.headers.cookie) {
+            console.log(`[Socket] Cookies present`);
             const cookies = socket.handshake.headers.cookie.split(';');
             const accessTokenCookie = cookies.find(c => c.trim().startsWith('accessToken='));
             if (accessTokenCookie) {
                 token = accessTokenCookie.split('=')[1];
             }
+        } else {
+            console.log(`[Socket] No cookies in handshake headers`);
         }
 
         if (!token) {
+            console.error(`[Socket] Auth failed: Token missing`);
             return next(new Error('Authentication error: Token missing'));
         }
 
@@ -126,8 +145,10 @@ async function start() {
             // We use fastify.jwt for verification
             const decoded = fastify.jwt.verify(token) as { sub: string };
             (socket as any).userId = decoded.sub;
+            console.log(`[Socket] Auth success for user: ${decoded.sub}`);
             next();
         } catch (err) {
+            console.error(`[Socket] Auth failed: Invalid token`, err);
             next(new Error('Authentication error: Invalid token'));
         }
     });
