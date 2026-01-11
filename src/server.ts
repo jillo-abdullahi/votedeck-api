@@ -21,17 +21,20 @@ async function start() {
         logger: true,
     });
 
+    // Unified CORS origins
+    const allowedOrigins = [
+        process.env.FRONTEND_URL,
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+        `http://${HOST}:${PORT}`, // Allow self (Swagger UI)
+        `http://localhost:${PORT}`
+    ].filter(Boolean) as string[];
+
+    console.log('Allowed Origins:', allowedOrigins);
+
     // Register CORS
     await fastify.register(cors, {
         origin: (origin, cb) => {
-            const allowedOrigins = [
-                process.env.FRONTEND_URL,
-                'http://localhost:5173',
-                'http://127.0.0.1:5173',
-                `http://${HOST}:${PORT}`, // Allow self (Swagger UI)
-                `http://localhost:${PORT}`
-            ].filter(Boolean);
-
             // Allow requests with no origin (like mobile apps or curl requests)
             if (!origin) return cb(null, true);
 
@@ -95,7 +98,7 @@ async function start() {
     // Create Socket.IO server
     const io = new SocketIOServer(fastify.server, {
         cors: {
-            origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+            origin: allowedOrigins,
             credentials: true,
         },
     });
