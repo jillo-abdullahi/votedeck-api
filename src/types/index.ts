@@ -71,7 +71,4 @@ export interface CreateRoomRequest {
 export interface CreateRoomResponse {
     roomId: string;
     joinUrl: string;
-    accessToken?: string;
-    userId: string;
-    recoveryCode?: string;
 }

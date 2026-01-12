@@ -1,44 +1,76 @@
-import jwt from 'jsonwebtoken';
+import admin from 'firebase-admin';
 import dotenv from 'dotenv';
+import { prisma } from '../db/prisma.js';
 
 dotenv.config();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key';
-const JWT_ACCESS_TTL = process.env.JWT_ACCESS_TTL || '7d';
+// Initialize Firebase Admin
+// Ideally, use GOOGLE_APPLICATION_CREDENTIALS env var or serviceAccountKey.json
+if (!admin.apps.length) {
+    try {
+        admin.initializeApp({
+            credential: admin.credential.applicationDefault(), // Looks for GOOGLE_APPLICATION_CREDENTIALS
+            projectId: process.env.FIREBASE_PROJECT_ID,
+        });
+        console.log('[Firebase] Admin initialized');
+    } catch (error) {
+        console.warn('[Firebase] Warning: Failed to initialize Firebase Admin. Auth verification will fail unless mocked or configured.', error);
+    }
+}
 
-export interface TokenPayload {
-    sub: string;
-    role: 'host' | 'participant';
-    roomId?: string;
+export interface DecodedUser {
+    uid: string;
+    email?: string;
+    name?: string;
+    picture?: string;
 }
 
 /**
- * Generate Access Token
+ * Verify Firebase ID Token
  */
-export function generateAccessToken(payload: TokenPayload): string {
-    return jwt.sign(payload, JWT_SECRET as jwt.Secret, { expiresIn: JWT_ACCESS_TTL as any });
+export async function verifyAuthToken(token: string): Promise<DecodedUser> {
+    if (process.env.NODE_ENV === 'development' && process.env.MOCK_FIREBASE_AUTH === 'true') {
+        // Dev backdoor for testing without valid Firebase tokens
+        console.log('[Auth] Using MOCK auth verification');
+        return {
+            uid: token, // treat token as UID
+            name: 'Mock User',
+            email: 'mock@example.com'
+        };
+    }
+
+    try {
+        const decodedToken = await admin.auth().verifyIdToken(token);
+        return {
+            uid: decodedToken.uid,
+            email: decodedToken.email,
+            name: decodedToken.name,
+            picture: decodedToken.picture
+        };
+    } catch (error) {
+        console.error('[Auth] Token verification failed:', error);
+        throw new Error('Invalid token');
+    }
 }
 
-
 /**
- * Verify Access Token
+ * Sync User with Database
+ * Ensures the user exists in Postgres. Updates profile if needed.
  */
-export function verifyAccessToken(token: string): TokenPayload {
-    return jwt.verify(token, JWT_SECRET) as TokenPayload;
-}
-
-/**
- * Get Cookie Options based on environment
- */
-export function getCookieOptions(maxAgeSeconds: number = 7 * 24 * 60 * 60) {
-    const isProd = process.env.NODE_ENV === 'production';
-    return {
-        path: '/',
-        httpOnly: true,
-        // Prod: Needs Secure + SameSite=None for cross-domain
-        // Dev: Needs Secure=false + SameSite=Lax for local IP/localhost
-        secure: isProd,
-        sameSite: isProd ? 'none' as const : 'lax' as const,
-        maxAge: maxAgeSeconds
-    };
+export async function syncUser(user: DecodedUser) {
+    return prisma.user.upsert({
+        where: { id: user.uid },
+        update: {
+            // Update fields if they changed (optional, maybe we only want to update explicit fields)
+            name: user.name ?? undefined,
+            email: user.email ?? undefined,
+            avatarUrl: user.picture ?? undefined,
+        },
+        create: {
+            id: user.uid,
+            name: user.name || 'Anonymous User',
+            email: user.email,
+            avatarUrl: user.picture
+        }
+    });
 }

@@ -10,11 +10,11 @@ datasource db {
 }
 
 model User {
-  id           String   @id
-  name         String
-  recoveryCode String?  @unique @map("recovery_code")
-  recoveryHash String?  @map("recovery_hash")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id        String   @id
+  name      String?
+  email     String?  @unique
+  avatarUrl String?  @map("avatar_url")
+  createdAt DateTime @default(now()) @map("created_at")
 
   @@map("users")
 }

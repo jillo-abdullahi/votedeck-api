@@ -1,9 +1,5 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
-import fastifyJwt from '@fastify/jwt';
-import cookie from '@fastify/cookie';
-import fastifySwagger from '@fastify/swagger';
-import fastifySwaggerUi from '@fastify/swagger-ui';
 import dotenv from 'dotenv';
 import { Server as SocketIOServer } from 'socket.io';
 import { roomRoutes } from './routes/rooms.js';
@@ -54,46 +50,23 @@ async function start() {
         credentials: true,
     });
 
-    // Register JWT
-    await fastify.register(fastifyJwt, {
-        secret: process.env.JWT_SECRET || 'super-secret-key',
-        cookie: {
-            cookieName: 'accessToken',
-            signed: false,
-        },
-    });
+    // Verify Auth Middleware (Custom)
+    fastify.decorate('verifyAuth', async (request: any, reply: any) => {
+        const authHeader = request.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return reply.code(401).send({ error: 'Unauthorized: Missing token' });
+        }
 
-    // Register Cookie
-    await fastify.register(cookie);
-
-    // Register Swagger (OpenAPI)
-    await fastify.register(fastifySwagger, {
-        openapi: {
-            info: {
-                title: 'VoteDeck API',
-                description: 'Real-time Planning Poker API',
-                version: '1.0.0',
-            },
-            components: {
-                securitySchemes: {
-                    cookieAuth: {
-                        type: 'apiKey',
-                        in: 'cookie',
-                        name: 'accessToken',
-                    },
-                },
-            },
-            security: [{ cookieAuth: [] }],
-        },
-    });
-
-    await fastify.register(fastifySwaggerUi, {
-        routePrefix: '/documentation',
-        uiConfig: {
-            docExpansion: 'list',
-            deepLinking: false,
-        },
-        staticCSP: true,
+        const token = authHeader.split(' ')[1];
+        try {
+            const { verifyAuthToken, syncUser } = await import('./utils/auth.js');
+            const decoded = await verifyAuthToken(token);
+            // Lazy sync: Ensure user exists in DB
+            await syncUser(decoded);
+            request.user = decoded;
+        } catch (err) {
+            return reply.code(401).send({ error: 'Unauthorized: Invalid token' });
+        }
     });
 
     // Register HTTP routes
@@ -104,8 +77,6 @@ async function start() {
     const io = new SocketIOServer(fastify.server, {
         cors: {
             origin: (origin, callback) => {
-                // Socket.IO CORS callback signature matches (err, success)
-                // but types might effectively match checkOrigin structure
                 checkOrigin(origin, (err, allow) => {
                     if (err) return callback(err, false);
                     return callback(null, allow);
@@ -119,21 +90,17 @@ async function start() {
     fastify.decorate('io', io);
 
     // WebSocket Handshake Authentication
-    io.use((socket, next) => {
+    io.use(async (socket, next) => {
         const origin = socket.handshake.headers.origin;
         console.log(`[Socket] Handshake from origin: ${origin}`);
 
-        let token: string | undefined;
+        // 1. Try "auth" object (client: socket = io({ auth: { token: '...' } }))
+        let token = socket.handshake.auth?.token;
 
-        if (socket.handshake.headers.cookie) {
-            console.log(`[Socket] Cookies present`);
-            const cookies = socket.handshake.headers.cookie.split(';');
-            const accessTokenCookie = cookies.find(c => c.trim().startsWith('accessToken='));
-            if (accessTokenCookie) {
-                token = accessTokenCookie.split('=')[1];
-            }
-        } else {
-            console.log(`[Socket] No cookies in handshake headers`);
+        // 2. Fallback to Authorization header
+        if (!token && socket.handshake.headers.authorization) {
+            const parts = socket.handshake.headers.authorization.split(' ');
+            if (parts.length === 2) token = parts[1];
         }
 
         if (!token) {
@@ -142,10 +109,14 @@ async function start() {
         }
 
         try {
-            // We use fastify.jwt for verification
-            const decoded = fastify.jwt.verify(token) as { sub: string };
-            (socket as any).userId = decoded.sub;
-            console.log(`[Socket] Auth success for user: ${decoded.sub}`);
+            const { verifyAuthToken, syncUser } = await import('./utils/auth.js');
+            const decoded = await verifyAuthToken(token);
+
+            // Sync user to DB on connection
+            await syncUser(decoded);
+
+            (socket as any).userId = decoded.uid;
+            console.log(`[Socket] Auth success for user: ${decoded.uid}`);
             next();
         } catch (err) {
             console.error(`[Socket] Auth failed: Invalid token`, err);

@@ -1,21 +1,19 @@
 import type { CreateRoomRequest, CreateRoomResponse } from '../types/index.js';
 import { roomStore } from '../store/roomStore.js';
 import { prisma } from '../db/prisma.js';
-import { getCookieOptions } from '../utils/auth.js';
 import type { FastifyInstance } from 'fastify';
 
 export async function roomRoutes(fastify: FastifyInstance) {
     /**
      * POST /rooms
      * Create a new room
+     * Requires Auth (Anonymous or Google) to identify the creator
      */
     fastify.post<{ Body: CreateRoomRequest; Reply: CreateRoomResponse }>(
         '/rooms',
         {
+            preHandler: (fastify as any).verifyAuth,
             schema: {
-                tags: ['Rooms'],
-                summary: 'Create a room',
-                description: 'Creates a new voting room. If no adminId provided, creates an anonymous user.',
                 body: {
                     type: 'object',
                     required: ['name', 'votingSystem'],
@@ -25,7 +23,6 @@ export async function roomRoutes(fastify: FastifyInstance) {
                             type: 'string',
                             enum: ['fibonacci', 'modified_fibonacci', 'tshirts', 'powers_2'],
                         },
-                        adminId: { type: 'string' },
                         adminName: { type: 'string' },
                     },
                 },
@@ -34,9 +31,7 @@ export async function roomRoutes(fastify: FastifyInstance) {
                         type: 'object',
                         properties: {
                             roomId: { type: 'string' },
-                            joinUrl: { type: 'string' },
-                            userId: { type: 'string' },
-                            recoveryCode: { type: 'string' }
+                            joinUrl: { type: 'string' }
                         }
                     },
                     '4xx': {
@@ -48,80 +43,32 @@ export async function roomRoutes(fastify: FastifyInstance) {
                 }
             },
         },
-        async (request, reply) => {
-            const { name, votingSystem, adminId, adminName } = request.body;
+        async (request: any, reply) => {
+            const { name, votingSystem, adminName } = request.body;
+            const userId = request.user.uid; // From auth middleware
 
-            // Determine effective adminId
-            // 1. If adminId provided in body, use it
-            // 2. If valid JWT token provided, use it (sub)
-            // 3. If adminName provided, generate a new ID
-            let effectiveAdminId = adminId;
-
-            let recoveryCode: string | undefined;
-            if (!effectiveAdminId) {
-                try {
-                    const decoded = await request.jwtVerify() as { sub: string };
-                    effectiveAdminId = decoded.sub;
-                } catch (err) {
-                    // Not authenticated
-                    if (adminName) {
-                        const { nanoid } = await import('nanoid');
-                        const bcrypt = await import('bcryptjs');
-
-                        // Generate recovery key parts
-                        const recoveryId = nanoid(10);
-                        const recoverySecret = nanoid(20);
-                        const recoverySecretHash = await bcrypt.hash(recoverySecret, 10);
-
-                        effectiveAdminId = nanoid();
-                        // Format: [lookup_id].[secret]
-                        recoveryCode = `${recoveryId}.${recoverySecret}`;
-
-                        // Persist new user with hash
-                        await prisma.user.create({
-                            data: {
-                                id: effectiveAdminId,
-                                name: adminName,
-                                recoveryCode: recoveryId, // stored for lookup
-                                recoveryHash: recoverySecretHash // stored for verification
-                            }
-                        });
-                    }
-                }
-            }
-
-            if (!effectiveAdminId) {
-                return reply.code(400).send({ error: 'Identification required (adminId or adminName)' } as any);
-            }
-
-            const room = await roomStore.createRoom(name, votingSystem, effectiveAdminId);
-
-            // If name provided, register the user
+            // Update user name if provided and not set
             if (adminName) {
-                await roomStore.addUser(room.id, {
-                    id: effectiveAdminId,
-                    name: adminName,
-                    socketId: '', // Will be updated on connect
+                await prisma.user.update({
+                    where: { id: userId },
+                    data: { name: adminName }
                 });
             }
 
-            // Generate host token
-            const hostToken = fastify.jwt.sign({
-                sub: effectiveAdminId,
-                role: 'host',
-                roomId: room.id
+            const room = await roomStore.createRoom(name, votingSystem, userId);
+
+            // Add user to room state explicitly
+            await roomStore.addUser(room.id, {
+                id: userId,
+                name: adminName || request.user.name || 'Host',
+                socketId: '', // Will be updated on connect
             });
 
             const joinUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/room/${room.id}`;
 
-            // Set host token in cookie
-            reply.setCookie('accessToken', hostToken, getCookieOptions());
-
             return reply.code(201).send({
                 roomId: room.id,
-                joinUrl,
-                userId: effectiveAdminId,
-                recoveryCode
+                joinUrl
             });
         }
     );
@@ -133,11 +80,8 @@ export async function roomRoutes(fastify: FastifyInstance) {
     fastify.get<{ Querystring: { limit?: number; offset?: number } }>(
         '/rooms/my',
         {
+            preHandler: (fastify as any).verifyAuth,
             schema: {
-                tags: ['Rooms'],
-                summary: 'Get my rooms',
-                description: 'Returns a list of rooms owned by the authenticated user.',
-                security: [{ cookieAuth: [] }],
                 querystring: {
                     type: 'object',
                     properties: {
@@ -172,19 +116,13 @@ export async function roomRoutes(fastify: FastifyInstance) {
                 }
             }
         },
-        async (request, reply) => {
-            try {
-                const decoded = await request.jwtVerify() as { sub: string };
-                const userId = decoded.sub;
+        async (request: any, reply) => {
+            const userId = request.user.uid;
+            const { limit = 20, offset = 0 } = request.query;
 
-                const { limit = 20, offset = 0 } = request.query;
+            const result = await roomStore.getUserRooms(userId, limit, offset);
 
-                const result = await roomStore.getUserRooms(userId, limit, offset);
-
-                return reply.send(result);
-            } catch (err) {
-                return reply.code(401).send({ error: 'Unauthorized' });
-            }
+            return reply.send(result);
         }
     );
 
@@ -196,9 +134,6 @@ export async function roomRoutes(fastify: FastifyInstance) {
         '/rooms/:id',
         {
             schema: {
-                tags: ['Rooms'],
-                summary: 'Get room details',
-                description: 'Returns metadata for a specific room.',
                 params: {
                     type: 'object',
                     required: ['id'],
@@ -244,6 +179,7 @@ export async function roomRoutes(fastify: FastifyInstance) {
             });
         }
     );
+
     /**
      * DELETE /rooms/:id
      * Delete a room
@@ -251,11 +187,8 @@ export async function roomRoutes(fastify: FastifyInstance) {
     fastify.delete<{ Params: { id: string } }>(
         '/rooms/:id',
         {
+            preHandler: (fastify as any).verifyAuth,
             schema: {
-                tags: ['Rooms'],
-                summary: 'Delete room',
-                description: 'Deletes a room. Requester must be the room owner.',
-                security: [{ cookieAuth: [] }],
                 params: {
                     type: 'object',
                     required: ['id'],
@@ -285,11 +218,10 @@ export async function roomRoutes(fastify: FastifyInstance) {
                 }
             }
         },
-        async (request, reply) => {
+        async (request: any, reply) => {
             try {
                 const { id } = request.params;
-                const decoded = await request.jwtVerify() as { sub: string };
-                const userId = decoded.sub;
+                const userId = request.user.uid;
 
                 const room = await roomStore.getRoom(id);
 
