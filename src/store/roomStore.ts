@@ -580,5 +580,19 @@ export const roomStore = {
 
         const members = await redis.smembers(`room:${roomId}:users`);
         return members.filter(id => id !== room.adminId).length;
+    },
+
+    /**
+     * Check if user is already in room
+     */
+    async isUserInRoom(roomId: string, userId: string): Promise<boolean> {
+        return (await redis.sismember(`room:${roomId}:users`, userId)) === 1;
+    },
+
+    /**
+     * Get total member count (including admin)
+     */
+    async getMemberCount(roomId: string): Promise<number> {
+        return await redis.scard(`room:${roomId}:users`);
     }
 };

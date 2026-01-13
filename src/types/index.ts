@@ -69,6 +69,7 @@ export interface CreateRoomRequest {
 }
 
 export interface CreateRoomResponse {
-    roomId: string;
-    joinUrl: string;
+    roomId?: string;
+    joinUrl?: string;
+    error?: string;
 }

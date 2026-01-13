@@ -55,6 +55,17 @@ export async function roomRoutes(fastify: FastifyInstance) {
                 });
             }
 
+            // Check game limit (max 10)
+            const existingRooms = await prisma.room.count({
+                where: { adminId: userId }
+            });
+
+            if (existingRooms >= 10) {
+                return reply.code(403).send({
+                    error: 'You have reached the limit of 10 active games. Please delete some games to create a new one.'
+                });
+            }
+
             const room = await roomStore.createRoom(name, votingSystem, userId);
 
             // Add user to room state explicitly

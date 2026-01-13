@@ -70,6 +70,17 @@ export function setupSocketHandlers(io: SocketIOServer) {
 
                 console.log(`[JOIN_ROOM] Adding user to room...`);
 
+                // Check for room capacity (allow re-joins)
+                const isMember = await roomStore.isUserInRoom(roomId, userId);
+                if (!isMember) {
+                    const memberCount = await roomStore.getMemberCount(roomId);
+                    if (memberCount >= 25) {
+                        console.warn(`[JOIN_ROOM] Room ${roomId} is full (25 members)`);
+                        socket.emit('ERROR', { message: 'Room is full (max 25 players)' });
+                        return;
+                    }
+                }
+
                 // Add user to room
                 const success = await roomStore.addUser(roomId, {
                     id: userId,
