@@ -165,7 +165,13 @@ export const roomStore = {
 
         await multi.exec();
 
-        // Remove from Postgres to require room ID for rejoin (clear history)
+        return true;
+    },
+
+    /**
+     * Explicitly leave room history (delete from Postgres)
+     */
+    async leaveRoomHistory(roomId: string, userId: string): Promise<void> {
         try {
             await (prisma as any).participant.delete({
                 where: {
@@ -178,8 +184,6 @@ export const roomStore = {
         } catch (err) {
             // Ignore if record doesn't exist
         }
-
-        return true;
     },
 
     /**

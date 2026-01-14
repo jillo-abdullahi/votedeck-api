@@ -269,6 +269,9 @@ export function setupSocketHandlers(io: SocketIOServer) {
 
             const { user, roomId } = userInfo;
 
+            // Explicitly remove from history
+            await roomStore.leaveRoomHistory(roomId, user.id);
+
             const wasRemoved = await roomStore.removeSocketFromUser(roomId, user.id, socket.id);
             await roomStore.unmapSocket(socket.id);
             socket.leave(roomId);
