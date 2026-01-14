@@ -165,6 +165,20 @@ export const roomStore = {
 
         await multi.exec();
 
+        // Remove from Postgres to require room ID for rejoin (clear history)
+        try {
+            await (prisma as any).participant.delete({
+                where: {
+                    roomId_userId: {
+                        roomId,
+                        userId
+                    }
+                }
+            });
+        } catch (err) {
+            // Ignore if record doesn't exist
+        }
+
         return true;
     },
 
