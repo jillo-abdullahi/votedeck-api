@@ -111,7 +111,9 @@ export async function roomRoutes(fastify: FastifyInstance) {
                                     properties: {
                                         id: { type: 'string' },
                                         name: { type: 'string' },
-                                        createdAt: { type: 'string' }
+                                        createdAt: { type: 'string' },
+                                        adminId: { type: 'string' },
+                                        activeUsers: { type: 'integer' }
                                     }
                                 }
                             },
