@@ -1,4 +1,4 @@
-import type { Room, RoomState, User, VotingSystemId } from '../types/index.js';
+import type { RevealPolicy, Room, RoomState, User, VotingSystemId } from '../types/index.js';
 import { generateRoomId } from '../utils/roomId.js';
 import { redis } from '../db/redis.js';
 import { prisma } from '../db/prisma.js';
@@ -9,8 +9,14 @@ export const roomStore = {
     /**
      * Create a new room
      */
-    async createRoom(name: string, votingSystem: VotingSystemId, adminId: string): Promise<Room> {
+    async createRoom(
+        name: string,
+        votingSystem: VotingSystemId,
+        adminId: string,
+        options: { revealPolicy?: RevealPolicy; enableCountdown?: boolean } = {}
+    ): Promise<Room> {
         const roomId = generateRoomId();
+        const { revealPolicy = 'everyone', enableCountdown = true } = options;
 
         // Persist in Postgres
         console.log(`[createRoom] Creating room ${roomId} in Postgres...`);
@@ -20,8 +26,9 @@ export const roomStore = {
                 name,
                 adminId,
                 votingSystem,
+                revealPolicy, // Assuming this field exists in Prisma schema or will be added/ignored if loose typed 'any' utilized
                 revealed: false,
-                enableCountdown: true, // Default
+                enableCountdown,
             }
         });
         console.log(`[createRoom] Postgres room created. Saving to Redis...`);
@@ -32,9 +39,9 @@ export const roomStore = {
             name,
             adminId,
             votingSystem,
-            revealPolicy: 'everyone',
+            revealPolicy,
             revealed: 'false',
-            enableCountdown: 'true',
+            enableCountdown: String(enableCountdown),
             createdAt: pgRoom.createdAt.toISOString(),
         };
 
@@ -51,7 +58,7 @@ export const roomStore = {
         return {
             ...roomMeta,
             revealed: false,
-            enableCountdown: true,
+            enableCountdown,
             createdAt: pgRoom.createdAt,
             users: new Map(),
             votes: new Map(),

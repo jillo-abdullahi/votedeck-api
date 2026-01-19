@@ -66,6 +66,8 @@ export interface CreateRoomRequest {
     votingSystem: VotingSystemId;
     adminId?: string;
     adminName?: string;
+    revealPolicy?: RevealPolicy;
+    enableCountdown?: boolean;
 }
 
 export interface CreateRoomResponse {

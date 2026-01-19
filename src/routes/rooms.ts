@@ -24,6 +24,11 @@ export async function roomRoutes(fastify: FastifyInstance) {
                             enum: ['fibonacci', 'modified_fibonacci', 'tshirts', 'powers_2'],
                         },
                         adminName: { type: 'string' },
+                        revealPolicy: {
+                            type: 'string',
+                            enum: ['everyone', 'admin']
+                        },
+                        enableCountdown: { type: 'boolean' }
                     },
                 },
                 response: {
@@ -44,7 +49,7 @@ export async function roomRoutes(fastify: FastifyInstance) {
             },
         },
         async (request: any, reply) => {
-            const { name, votingSystem, adminName } = request.body;
+            const { name, votingSystem, adminName, revealPolicy, enableCountdown } = request.body;
             const userId = request.user.uid; // From auth middleware
 
             // Update user name if provided and not set
@@ -66,7 +71,12 @@ export async function roomRoutes(fastify: FastifyInstance) {
                 });
             }
 
-            const room = await roomStore.createRoom(name, votingSystem, userId);
+            const room = await roomStore.createRoom(
+                name,
+                votingSystem,
+                userId,
+                { revealPolicy, enableCountdown }
+            );
 
             // Add user to room state explicitly
             await roomStore.addUser(room.id, {
